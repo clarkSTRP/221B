@@ -1,0 +1,83 @@
+import os
+from pathlib import Path
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse, PlainTextResponse
+import docker
+
+IMAGE = os.getenv("SHERLOCK_IMAGE", "sherlock/sherlock:latest")
+
+DATA_DIR = Path(__file__).parent.joinpath("..", "data").resolve()
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+client = docker.from_env()
+app = FastAPI(title="Sherlock Web (Host)")
+
+HTML = """
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Sherlock Web</title></head>
+  <body style="max-width:760px;margin:40px auto;font-family:sans-serif;line-height:1.5">
+    <h1>Sherlock Web</h1>
+    <form method="post" action="/run" style="display:flex;gap:8px;align-items:center">
+      <label>Username:</label>
+      <input name="username" placeholder="ex: johndoe" required />
+      <select name="format">
+        <option value="csv">CSV</option>
+        <option value="json">JSON</option>
+      </select>
+      <button type="submit">Lancer</button>
+    </form>
+    <p>Les résultats seront enregistrés dans : <code>../data</code></p>
+    <p><a href="/health">Health</a></p>
+  </body>
+</html>
+"""
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return HTML
+
+@app.get("/health")
+def health():
+    try:
+        client.ping()
+        return {"status": "ok", "image": IMAGE}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+@app.post("/run", response_class=PlainTextResponse)
+def run(username: str = Form(...), format: str = Form("csv")):
+    username = username.strip()
+    if not username:
+        return PlainTextResponse("Username vide.", status_code=400)
+
+    export_flag = "--csv" if format == "csv" else "--json"
+    volumes = {str(DATA_DIR): {"bind": "/data", "mode": "rw"}}
+
+    # on génère un nom de fichier de sortie valide
+    safe_user = username.replace("/", "_").replace("\\", "_").strip()
+    ext = "csv" if format == "csv" else "json"
+    out_file = f"/data/{safe_user}.{ext}"
+
+    cmd = f"{safe_user} -o {out_file} {export_flag}"
+
+
+    try:
+        logs = client.containers.run(
+            IMAGE,
+            command=cmd,
+            volumes=volumes,
+            remove=True,
+            tty=False,
+            stdin_open=False
+        )
+        return logs.decode("utf-8", errors="ignore")
+    except docker.errors.ImageNotFound:
+        return PlainTextResponse(
+            f"Image introuvable: {IMAGE}. Faites `docker pull {IMAGE}` ou définissez SHERLOCK_IMAGE sur votre image buildée.",
+            status_code=500
+        )
+    except docker.errors.APIError as e:
+        return PlainTextResponse(f"Erreur Docker API: {e.explanation}", status_code=500)
+    except Exception as e:
+        return PlainTextResponse(f"Erreur: {e}", status_code=500)
