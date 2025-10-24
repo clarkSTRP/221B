@@ -29,14 +29,14 @@ async def health():
 async def run(username: str = Form(...), format: str = Form("csv")):
     username = username.strip()
     if not username:
-        return PlainTextResponse("Username vide.", status_code=400)
+        return PlainTextResponse("Empty username.", status_code=400)
 
     export_flag = "--csv" if format == "csv" else "--json"
     volumes = {str(DATA_DIR): {"bind": "/data", "mode": "rw"}}
     safe_user = username.replace("/", "_").replace("\\", "_").strip()
     ext = "csv" if format == "csv" else "json"
     out_file = f"/data/{safe_user}.{ext}"
-    cmd = f"{safe_user} -o {out_file} {export_flag}" 
+    cmd = f"{safe_user} -o {out_file} {export_flag}"
 
     try:
         logs = client.containers.run(
@@ -50,10 +50,10 @@ async def run(username: str = Form(...), format: str = Form("csv")):
         return logs.decode("utf-8", errors="ignore")
     except docker.errors.ImageNotFound:
         return PlainTextResponse(
-            f"Image introuvable: {IMAGE}. Faites `docker pull {IMAGE}` ou définissez SHERLOCK_IMAGE sur votre image buildée.",
+            f"Docker image '{IMAGE}' not found.",
             status_code=500
         )
     except docker.errors.APIError as e:
-        return PlainTextResponse(f"Erreur Docker API: {e.explanation}", status_code=500)
+        return PlainTextResponse(f"Docker API error: {e.explanation}", status_code=500)
     except Exception as e:
-        return PlainTextResponse(f"Erreur: {e}", status_code=500)
+        return PlainTextResponse(f"Error: {e}", status_code=500)
